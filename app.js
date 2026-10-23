@@ -1036,18 +1036,17 @@ async function vistaLocales(el) {
 // ---------------------------------------------------------------------------
 async function vistaAdmin(el) {
   if (!puede('admin')) throw new Error('Necesitás rol admin.');
-  const tab = sessionStorage.getItem('pw_admin_tab') || 'ajustes';
-  el.innerHTML = `<div class="encabezado"><div><h1>Configuración</h1><p>Ajustes, conexiones, usuarios y auditoría.</p></div></div>
-    <div class="panel"><div class="tabs" id="tabs-adm">${[['ajustes', 'Ajustes'], ['salud', 'Conexiones'], ['usuarios', 'Usuarios'], ['auditoria', 'Auditoría']].map(([k, t]) => `<button data-t="${k}" class="${k === tab ? 'activo' : ''}">${t}</button>`).join('')}</div><div id="adm" class="panel-pad"></div></div>`;
-  const ir = (t) => { sessionStorage.setItem('pw_admin_tab', t); $$('#tabs-adm button').forEach(b => b.classList.toggle('activo', b.dataset.t === t)); ({ ajustes: adminAjustes, salud: adminSalud, usuarios: adminUsuarios, auditoria: adminAuditoria })[t]($('#adm')).catch(e => { $('#adm').innerHTML = `<p class="txt-neg">${esc(e.message)}</p>`; }); };
+  const tab0 = sessionStorage.getItem('pw_admin_tab');
+  const tab = ['ajustes', 'usuarios', 'auditoria'].includes(tab0) ? tab0 : 'ajustes';
+  el.innerHTML = `<div class="encabezado"><div><h1>Configuración</h1><p>Ajustes, usuarios y auditoría.</p></div></div>
+    <div class="panel"><div class="tabs" id="tabs-adm">${[['ajustes', 'Ajustes'], ['usuarios', 'Usuarios'], ['auditoria', 'Auditoría']].map(([k, t]) => `<button data-t="${k}" class="${k === tab ? 'activo' : ''}">${t}</button>`).join('')}</div><div id="adm" class="panel-pad"></div></div>`;
+  const ir = (t) => { sessionStorage.setItem('pw_admin_tab', t); $$('#tabs-adm button').forEach(b => b.classList.toggle('activo', b.dataset.t === t)); ({ ajustes: adminAjustes, usuarios: adminUsuarios, auditoria: adminAuditoria })[t] || adminAjustes($('#adm')).catch(e => { $('#adm').innerHTML = `<p class="txt-neg">${esc(e.message)}</p>`; }); };
   $$('#tabs-adm button').forEach(b => b.onclick = () => ir(b.dataset.t));
   ir(tab);
 }
 
 const CFG_UI = [
   { k: 'modo_simulacion', tipo: 'switch', t: 'Modo simulación', d: 'Prendido: “Enviar a Shares” arma y muestra cada comprobante pero NO lo manda (como --dry-run). Apagalo para cargar de verdad.', si: 'Prendido (no se envía nada)', no: 'Apagado: se carga en Shares', confirmarNo: 'A partir de ahora "Enviar a Shares" carga los comprobantes de verdad. ¿Seguimos?' },
-  { k: 'tolerancia_total', tipo: 'numero', t: 'Tolerancia del cuadre total', d: 'Diferencia máxima entre la suma de los ítems y el “Total Descuento $” del PDF. Si se pasa, queda para revisar.', pre: '$', step: 0.01 },
-  { k: 'tolerancia_iva', tipo: 'numero', t: 'Tolerancia del IVA', d: 'Diferencia máxima entre el IVA del PDF y gravado × alícuota (Payway redondea día por día). Si se pasa, es solo un aviso.', pre: '$', step: 0.01 },
 ];
 
 async function adminAjustes(el) {
@@ -1056,7 +1055,7 @@ async function adminAjustes(el) {
   el.innerHTML = CFG_UI.map(it => `<div class="cfg-row"><div><div class="t">${esc(it.t)}</div><div class="d">${esc(it.d)}</div></div><div class="cfg-ctrl">
     ${it.tipo === 'switch' ? `<label class="switch"><input type="checkbox" data-sw="${it.k}" ${cfg[it.k] ? 'checked' : ''}><span></span></label><span class="sw-txt" data-swtxt="${it.k}">${esc(cfg[it.k] ? it.si : it.no)}</span>`
       : `<span class="muted">${it.pre || ''}</span><input type="number" data-num="${it.k}" value="${esc(cfg[it.k])}" min="0" step="${it.step || 1}" style="width:110px">`}</div></div>`).join('')
-    + '<p class="small muted" style="margin-top:14px">Los cambios se guardan solos y quedan en Auditoría. El catálogo de impuestos de Shares (SIRTAC, IIBB por jurisdicción, percepción IVA) no se toca desde acá: se cambia con una versión nueva del Worker.</p>';
+    + '<p class="small muted" style="margin-top:14px">Los cambios se guardan solos y quedan en Auditoría.</p>';
   $$('[data-sw]', el).forEach(c => c.onchange = async () => {
     const it = CFG_UI.find(x => x.k === c.dataset.sw);
     const msg = c.checked ? it.confirmarSi : it.confirmarNo;
@@ -1072,18 +1071,6 @@ async function adminAjustes(el) {
     try { await api('/api/config', { method: 'PUT', body: { clave: i.dataset.num, valor: Number(String(i.value).replace(',', '.')) } }); toast('Guardado'); }
     catch (e) { toast(e.message, true); }
   });
-}
-
-async function adminSalud(el) {
-  const s = await api('/api/salud');
-  const fila = (ok, t, d, probar = '') => `<div class="cfg-row"><div><div class="t">${ok ? '<span class="badge b-ok">configurado</span>' : '<span class="badge b-critica">falta</span>'} ${esc(t)}</div><div class="d">${d}</div></div><div class="cfg-ctrl">${probar}</div></div>`;
-  el.innerHTML = fila(s.shares, 'Shares', `SHARES_USERNAME y SHARES_PASSWORD · ${esc(s.shares_base)}`, `<button class="btn btn-chico" data-p="shares">Probar</button>`)
-    + fila(s.locales > 0, 'Locales', `${s.locales} direcciones con cuenta · ${s.cuentas} cuentas de Shares sincronizadas`)
-    + `<p class="small muted" style="margin-top:12px">Versión del Worker ${esc(s.version)} · API ${esc(API)}</p><div id="res-p"></div>`;
-  $$('[data-p]', el).forEach(b => b.onclick = () => conBoton(b, async () => {
-    try { const r = await api('/api/probar/' + b.dataset.p, { method: 'POST' }); $('#res-p').innerHTML = `<div class="aviso-mes ok">${ICO.check}<div>${esc(r.mensaje)}</div></div>`; }
-    catch (e) { $('#res-p').innerHTML = `<div class="aviso-mes mal">${ICO.alert}<div>${esc(e.message)}</div></div>`; }
-  }));
 }
 
 async function adminUsuarios(el) {
