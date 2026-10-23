@@ -1040,7 +1040,7 @@ async function vistaAdmin(el) {
   const tab = ['ajustes', 'usuarios', 'auditoria'].includes(tab0) ? tab0 : 'ajustes';
   el.innerHTML = `<div class="encabezado"><div><h1>Configuración</h1><p>Ajustes, usuarios y auditoría.</p></div></div>
     <div class="panel"><div class="tabs" id="tabs-adm">${[['ajustes', 'Ajustes'], ['usuarios', 'Usuarios'], ['auditoria', 'Auditoría']].map(([k, t]) => `<button data-t="${k}" class="${k === tab ? 'activo' : ''}">${t}</button>`).join('')}</div><div id="adm" class="panel-pad"></div></div>`;
-  const ir = (t) => { sessionStorage.setItem('pw_admin_tab', t); $$('#tabs-adm button').forEach(b => b.classList.toggle('activo', b.dataset.t === t)); ({ ajustes: adminAjustes, usuarios: adminUsuarios, auditoria: adminAuditoria })[t] || adminAjustes($('#adm')).catch(e => { $('#adm').innerHTML = `<p class="txt-neg">${esc(e.message)}</p>`; }); };
+  const ir = (t) => { sessionStorage.setItem('pw_admin_tab', t); $$('#tabs-adm button').forEach(b => b.classList.toggle('activo', b.dataset.t === t)); (({ ajustes: adminAjustes, usuarios: adminUsuarios, auditoria: adminAuditoria })[t] || adminAjustes)($('#adm')).catch(e => { $('#adm').innerHTML = `<p class="txt-neg">${esc(e.message)}</p>`; }); };
   $$('#tabs-adm button').forEach(b => b.onclick = () => ir(b.dataset.t));
   ir(tab);
 }
