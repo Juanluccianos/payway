@@ -444,7 +444,7 @@ function mostrarResultadoCorrida(periodo, res) {
   });
 }
 
-// ---- Envío a Shares en tandas de 5 ----
+// ---- Envío a Shares en tandas de 5 (el Worker va a ritmo y, si Shares frena, acá se espera y se sigue) ----
 async function enviarAShares(periodo, ids, { titulo } = {}) {
   if (PROC.activo) { toast('Ya hay un proceso corriendo.', true); return; }
   if (!ids.length) { toast('No hay liquidaciones listas para enviar.', true); return; }
@@ -461,28 +461,43 @@ async function enviarAShares(periodo, ids, { titulo } = {}) {
   const nombre = (id) => { const f = liqDe(id); return f ? (f.archivo_nombre || nombreLocal(f)) : '#' + id; };
   pintarProceso();
   let fatal = null;
-  for (let k = 0; k < ids.length && !PROC.cancelar && !fatal; k += 5) {
-    const tanda = ids.slice(k, k + 5);
+  // Cola: si Shares pide pausa (HTTP 429), se espera lo que dice y se sigue sola con las que faltan
+  const cola = ids.slice();
+  let pausas = 0;
+  while (cola.length && !PROC.cancelar && !fatal) {
+    const tanda = cola.splice(0, 5);
     PROC.actuales = tanda.map(nombre); pintarProceso();
+    let espera = 0;
     try {
       const r = await api('/api/shares/enviar', { method: 'POST', body: { ids: tanda } });
+      const reintentar = [];
       for (const x of r.resultados) {
+        if (x.frenado) { reintentar.push(x.id); espera = Math.max(espera, x.espera_seg || 60); continue; }
         let estado = 'ok';
         if (x.simulado) PROC.simuladas++;
         else if (x.ok && x.resultado === 'duplicado') { PROC.ya_existian++; estado = 'dup'; }
         else if (x.ok) PROC.cargadas++;
         else if (!x.omitida) { PROC.errores++; estado = 'error'; errores.push(x); }
         if (x.fatal) fatal = x.message;
+        PROC.hechos++;
         PROC.ultimos.unshift({ archivo: `${nombre(x.id)} · ${x.ref || ''}`, estado, detalle: estado === 'error' ? x.message : x.shares_ref ? 'nro_reg ' + x.shares_ref : '' });
       }
+      cola.unshift(...reintentar);
       PROC.ultimos = PROC.ultimos.slice(0, 6);
     } catch (e) {
       // Sin respuesta: no sabemos si la tanda entró. Cortamos; al reenviar, Shares contesta 409 en las que ya estén.
       fatal = e.message + ' (la última tanda pudo haber entrado: al reenviar, las que ya estén vuelven como "ya existía")';
+      PROC.hechos += tanda.length;
     }
-    PROC.hechos = Math.min(ids.length, k + tanda.length);
     pintarProceso();
     refrescoVivo(periodo);
+    if (espera && !fatal && !PROC.cancelar) {
+      if (++pausas > 15) { fatal = `Shares sigue pidiendo pausa (HTTP 429). Quedaron ${cola.length} sin mandar: volvé a tocar “Enviar a Shares” en un rato y siguen desde ahí.`; break; }
+      for (let s = espera; s > 0 && !PROC.cancelar; s--) {
+        PROC.actuales = [`Shares pidió una pausa: sigo en ${s} s (faltan ${cola.length})`]; pintarProceso();
+        await new Promise(ok => setTimeout(ok, 1000));
+      }
+    }
   }
   PROC.segundos = Math.round((Date.now() - PROC.inicio) / 1000);
   PROC.activo = false; PROC.actuales = [];
@@ -1036,13 +1051,23 @@ async function vistaLocales(el) {
 // ---------------------------------------------------------------------------
 async function vistaAdmin(el) {
   if (!puede('admin')) throw new Error('Necesitás rol admin.');
+  const TABS = [['ajustes', 'Ajustes', adminAjustes], ['usuarios', 'Usuarios', adminUsuarios], ['auditoria', 'Auditoría', adminAuditoria]];
   const tab0 = sessionStorage.getItem('pw_admin_tab');
-  const tab = ['ajustes', 'usuarios', 'auditoria'].includes(tab0) ? tab0 : 'ajustes';
+  const tab = TABS.some(([k]) => k === tab0) ? tab0 : 'ajustes';
   el.innerHTML = `<div class="encabezado"><div><h1>Configuración</h1><p>Ajustes, usuarios y auditoría.</p></div></div>
-    <div class="panel"><div class="tabs" id="tabs-adm">${[['ajustes', 'Ajustes'], ['usuarios', 'Usuarios'], ['auditoria', 'Auditoría']].map(([k, t]) => `<button data-t="${k}" class="${k === tab ? 'activo' : ''}">${t}</button>`).join('')}</div><div id="adm" class="panel-pad"></div></div>`;
-  const ir = (t) => { sessionStorage.setItem('pw_admin_tab', t); $$('#tabs-adm button').forEach(b => b.classList.toggle('activo', b.dataset.t === t)); (({ ajustes: adminAjustes, usuarios: adminUsuarios, auditoria: adminAuditoria })[t] || adminAjustes)($('#adm')).catch(e => { $('#adm').innerHTML = `<p class="txt-neg">${esc(e.message)}</p>`; }); };
-  $$('#tabs-adm button').forEach(b => b.onclick = () => ir(b.dataset.t));
-  ir(tab);
+    <div class="panel"><div class="tabs" id="tabs-adm">${TABS.map(([k, t]) => `<button data-t="${k}" class="${k === tab ? 'activo' : ''}">${t}</button>`).join('')}</div>
+    ${TABS.map(([k]) => `<div class="panel-pad adm-pane${k === tab ? '' : ' hidden'}" data-pane="${k}"><div class="vacio"><span class="cargando"></span></div></div>`).join('')}</div>`;
+  // Las tres pestañas se cargan juntas al entrar: después cambiar entre ellas es instantáneo
+  const cargar = (k, fn) => fn($(`[data-pane="${k}"]`, el)).catch(e => { const p = $(`[data-pane="${k}"]`, el); if (p) p.innerHTML = `<p class="txt-neg">${esc(e.message)}</p>`; });
+  TABS.forEach(([k, , fn]) => cargar(k, fn));
+  $$('#tabs-adm button', el).forEach(b => b.onclick = () => {
+    const t = b.dataset.t;
+    sessionStorage.setItem('pw_admin_tab', t);
+    $$('#tabs-adm button', el).forEach(x => x.classList.toggle('activo', x === b));
+    $$('.adm-pane', el).forEach(p => p.classList.toggle('hidden', p.dataset.pane !== t));
+    // La auditoría se refresca por detrás (muestra lo último sin hacer esperar)
+    if (t === 'auditoria') cargar(t, adminAuditoria);
+  });
 }
 
 const CFG_UI = [
