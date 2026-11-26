@@ -1116,7 +1116,8 @@ async function vistaLocales(el) {
 // ---------------------------------------------------------------------------
 async function vistaAdmin(el) {
   if (!puede('admin')) throw new Error('Necesitás rol admin.');
-  const TABS = [['ajustes', 'Ajustes', adminAjustes], ['usuarios', 'Usuarios', adminUsuarios], ['auditoria', 'Auditoría', adminAuditoria]];
+  // Los usuarios y permisos se manejan en el portal de Herramientas
+  const TABS = [['ajustes', 'Ajustes', adminAjustes], ['auditoria', 'Auditoría', adminAuditoria]];
   const tab0 = sessionStorage.getItem('pw_admin_tab');
   const tab = TABS.some(([k]) => k === tab0) ? tab0 : 'ajustes';
   el.innerHTML = `<div class="encabezado"><div><h1>Configuración</h1><p>Ajustes, usuarios y auditoría.</p></div></div>
