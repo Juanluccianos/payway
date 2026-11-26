@@ -837,3 +837,7 @@ tr.muted td { opacity: .55; }
   .corr { grid-template-columns: 22px minmax(0, 1fr); } .corr-acc { grid-column: 2; }
   .pasos-liq li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
+
+/* Tablas con alto máximo (plan de cuentas, listas largas): se desplazan ADENTRO de su recuadro, no se salen */
+.tabla-wrap[style*="max-height"] { overflow: auto !important; overscroll-behavior: contain; }
+.tabla-wrap[style*="max-height"] thead th { position: sticky; top: 0; z-index: 1; }
